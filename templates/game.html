@@ -155,8 +155,8 @@ function renderOpponents(state) {
     const area = document.getElementById("opponents-area");
     area.innerHTML = "";
 
-    const order = (turn_order && turn_order.length) ? turn_order : Object.keys(players);
-    const others = order.filter(n => n !== MY_NAME);
+    const allNames = Object.keys(players);
+    const others = allNames.filter(n => n !== MY_NAME);
 
     if (others.length === 0) {
         area.innerHTML = '<p class="empty-opponents">No other players yet</p>';
@@ -168,11 +168,13 @@ function renderOpponents(state) {
         if (!p) return;
         const isActive = name === whose_turn;
 
+        const sittingOut = turn_order && turn_order.length && !turn_order.includes(name);
         const box = document.createElement("div");
-        box.className = "opponent-box" + (isActive ? " active" : "");
+        box.className = "opponent-box" + (isActive ? " active" : "") + (sittingOut ? " sitting-out" : "");
 
         const turnTag = isActive ? ' <span class="turn-tag">playing</span>' : "";
-        let html = `<div class="opp-name">${name}${turnTag}</div>`;
+        const outTag  = sittingOut ? ' <span class="out-tag">sitting out</span>' : "";
+        let html = `<div class="opp-name">${name}${turnTag}${outTag}</div>`;
         html += `<div class="opp-chips">${p.chips.toLocaleString()} chips</div>`;
 
         if (p.hands && p.hands.length) {
@@ -232,7 +234,11 @@ function renderMyArea(state) {
     }
 
     const statusEl = document.getElementById("my-status");
-    if (phase === "playing" && whose_turn && whose_turn !== MY_NAME) {
+    const inRound = state.turn_order && state.turn_order.includes(MY_NAME);
+    if ((phase === "betting" || phase === "playing") && !inRound) {
+        statusEl.textContent = "Sitting out this round — buy chips to rejoin.";
+        statusEl.className = "waiting-status";
+    } else if (phase === "playing" && whose_turn && whose_turn !== MY_NAME) {
         statusEl.textContent = "Waiting for " + whose_turn + " to play…";
         statusEl.className = "waiting-status";
     } else if (phase === "betting" && me.hands && me.hands.length > 0) {
@@ -252,14 +258,20 @@ function updateControls(state) {
 
     hide("ctrl-start"); hide("ctrl-bet"); hide("ctrl-play"); hide("ctrl-reload");
 
+    const inRound = state.turn_order && state.turn_order.includes(MY_NAME);
+
     if (phase === "waiting" || phase === "payout") {
         show("ctrl-start");
         if (me && me.chips === 0) show("ctrl-reload");
     }
 
     if (phase === "betting" && me) {
-        const hasBet = me.hands && me.hands.length > 0;
-        if (!hasBet) show("ctrl-bet");
+        if (!inRound) {
+            if (me.chips === 0) show("ctrl-reload");
+        } else {
+            const hasBet = me.hands && me.hands.length > 0;
+            if (!hasBet) show("ctrl-bet");
+        }
     }
 
     if (phase === "playing" && whose_turn === MY_NAME && me) {

@@ -204,6 +204,19 @@ header h1 { font-size: 1.2rem; }
     letter-spacing: 0.04em;
 }
 
+.out-tag {
+    font-size: 0.6rem;
+    font-weight: 700;
+    padding: 0.1rem 0.35rem;
+    background: rgba(255,255,255,0.15);
+    color: rgba(255,255,255,0.6);
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.opponent-box.sitting-out { opacity: 0.5; }
+
 .waiting-bet { font-size: 0.75rem; opacity: 0.4; font-style: italic; }
 
 /* ── My area ─────────────────────────────────────────────────────── */

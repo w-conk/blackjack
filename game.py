@@ -298,10 +298,11 @@ class BlackjackGame:
     def start_betting(self):
         if self.phase not in (GamePhase.WAITING, GamePhase.PAYOUT):
             raise ValueError("Cannot start betting now.")
-        if not self.players:
-            raise ValueError("No players at the table.")
+        eligible = [name for name, p in self.players.items() if p.chips >= 25]
+        if not eligible:
+            raise ValueError("No players have enough chips to play.")
         self.phase = GamePhase.BETTING
-        self.turn_order = list(self.players.keys())
+        self.turn_order = eligible
         for player in self.players.values():
             player.hands = []
             player.current_hand_index = 0
