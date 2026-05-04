@@ -281,6 +281,15 @@ class BlackjackGame:
 
     def remove_player(self, name):
         self.players.pop(name, None)
+        if name in self.turn_order:
+            idx = self.turn_order.index(name)
+            self.turn_order.remove(name)
+            # Keep active_player_index pointing at the right player
+            if idx < self.active_player_index:
+                self.active_player_index -= 1
+            elif idx == self.active_player_index:
+                # Their turn — index now points at the next player automatically
+                pass
 
     # ------------------------------------------------------------------
     # Round flow

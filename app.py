@@ -136,8 +136,19 @@ def on_disconnect():
     name = sid_to_player.pop(request.sid, None)
     if not name:
         return
-    if game.phase in (GamePhase.WAITING, GamePhase.PAYOUT):
-        game.remove_player(name)
+
+    game.remove_player(name)
+
+    # Recover game state after removing the player
+    if not game.players:
+        game.phase = GamePhase.WAITING
+        game.turn_order = []
+        game.active_player_index = 0
+    elif game.phase == GamePhase.BETTING and game.all_bets_placed():
+        game.deal_initial()
+    elif game.phase == GamePhase.PLAYING and game.whose_turn() is None:
+        game._dealer_play()
+
     emit_state()
 
 
