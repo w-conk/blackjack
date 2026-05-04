@@ -22,53 +22,66 @@
 
     <div id="message-bar" class="hidden"></div>
 
-    <main>
+    <div id="table">
 
-        <section id="dealer-section">
-            <h2>Dealer <span id="dealer-value"></span></h2>
-            <div id="dealer-cards" class="card-row"></div>
-        </section>
+        <!-- Dealer -->
+        <div id="dealer-area">
+            <div id="dealer-label">Dealer <span id="dealer-value"></span></div>
+            <div id="dealer-cards" class="card-row centered"></div>
+        </div>
 
-        <section id="players-section">
-            <div id="players-grid"></div>
-        </section>
+        <!-- Other players -->
+        <div id="opponents-area">
+            <!-- populated by JS -->
+        </div>
 
-        <section id="controls">
-
-            <div id="ctrl-start" class="control-group hidden">
-                <button id="btn-start" onclick="startRound()">Start Round</button>
+        <!-- Me -->
+        <div id="my-area">
+            <div id="my-info">
+                <span id="my-name-label">{{ player_name }}</span>
+                <span id="my-chips-label"></span>
             </div>
+            <div id="my-hands"></div>
+            <div id="my-status"></div>
 
-            <div id="ctrl-bet" class="control-group hidden">
-                <p>Place your bet</p>
-                <div class="chip-buttons">
-                    <button class="chip-btn" onclick="addBet(5)">+5</button>
-                    <button class="chip-btn" onclick="addBet(25)">+25</button>
-                    <button class="chip-btn" onclick="addBet(100)">+100</button>
-                    <button class="chip-btn" onclick="addBet(500)">+500</button>
+            <!-- Controls live inside my area -->
+            <div id="controls">
+
+                <div id="ctrl-start" class="control-group hidden">
+                    <button id="btn-start" onclick="startRound()">Start Round</button>
                 </div>
-                <div class="bet-input-row">
-                    <input type="number" id="bet-amount" value="25" min="25" step="5">
-                    <button onclick="placeBet()">Bet</button>
-                    <button class="btn-secondary" onclick="clearBet()">Clear</button>
+
+                <div id="ctrl-bet" class="control-group hidden">
+                    <div class="chip-buttons">
+                        <button class="chip-btn" onclick="addBet(5)">+5</button>
+                        <button class="chip-btn" onclick="addBet(25)">+25</button>
+                        <button class="chip-btn" onclick="addBet(100)">+100</button>
+                        <button class="chip-btn" onclick="addBet(500)">+500</button>
+                    </div>
+                    <div class="bet-input-row">
+                        <input type="number" id="bet-amount" value="25" min="25" step="5">
+                        <button onclick="placeBet()">Place Bet</button>
+                        <button class="btn-secondary" onclick="clearBet()">Clear</button>
+                    </div>
                 </div>
+
+                <div id="ctrl-play" class="control-group hidden">
+                    <button id="btn-hit"    onclick="doAction('hit')">Hit</button>
+                    <button id="btn-stand"  onclick="doAction('stand')">Stand</button>
+                    <button id="btn-double" onclick="doAction('double_down')">Double</button>
+                    <button id="btn-split"  onclick="doAction('split')">Split</button>
+                </div>
+
+                <div id="ctrl-reload" class="control-group hidden">
+                    <button class="btn-secondary" onclick="reloadChips()">Buy More Chips</button>
+                </div>
+
             </div>
+        </div>
 
-            <div id="ctrl-play" class="control-group hidden">
-                <button id="btn-hit" onclick="doAction('hit')">Hit</button>
-                <button id="btn-stand" onclick="doAction('stand')">Stand</button>
-                <button id="btn-double" onclick="doAction('double_down')">Double</button>
-                <button id="btn-split" onclick="doAction('split')">Split</button>
-            </div>
+    </div><!-- /#table -->
 
-            <div id="ctrl-reload" class="control-group hidden">
-                <button class="btn-secondary" onclick="reloadChips()">Buy More Chips</button>
-            </div>
-
-        </section>
-
-    </main>
-</div>
+</div><!-- /#app -->
 
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script>
@@ -86,17 +99,20 @@ function formatCard(raw) {
     return { display: rank + (SUIT_SYMBOLS[suit] || suit), red: RED_SUITS.has(suit), back: false };
 }
 
-function cardEl(raw) {
+function cardEl(raw, size) {
     const { display, red, back } = formatCard(raw);
     const div = document.createElement("div");
-    div.className = "card" + (back ? " card-back" : "") + (red ? " red" : "");
+    div.className = "card"
+        + (back ? " card-back" : "")
+        + (red  ? " red"       : "")
+        + (size ? " card-" + size : "");
     div.textContent = display;
     return div;
 }
 
-function renderCards(container, cards) {
+function renderCards(container, cards, size) {
     container.innerHTML = "";
-    (cards || []).forEach(c => container.appendChild(cardEl(c)));
+    (cards || []).forEach(c => container.appendChild(cardEl(c, size)));
 }
 
 function show(id) { document.getElementById(id).classList.remove("hidden"); }
@@ -112,26 +128,129 @@ function showMessage(msg, type = "info") {
 
 function updatePhase(phase) {
     const labels = {
-        waiting: "Waiting",
-        betting: "Betting",
-        dealing: "Dealing",
-        playing: "Playing",
-        dealer: "Dealer’s Turn",
-        payout: "Round Over",
+        waiting: "Waiting", betting: "Betting", dealing: "Dealing",
+        playing: "Playing", dealer: "Dealer's Turn", payout: "Round Over",
     };
     const badge = document.getElementById("phase-badge");
     badge.textContent = labels[phase] || phase;
     badge.className = "phase-" + phase;
 }
 
+function handStatusLabel(status) {
+    return { bust: "BUST", blackjack: "BLACKJACK!", stood: "Stood", doubled: "Doubled", active: "" }[status] || "";
+}
+
+// ── Dealer ───────────────────────────────────────────────────────
+
+function renderDealer(state) {
+    renderCards(document.getElementById("dealer-cards"), state.dealer.cards, "md");
+    const v = state.dealer.value;
+    document.getElementById("dealer-value").textContent = v != null ? "(" + v + ")" : "";
+}
+
+// ── Opponents (everyone except me) ───────────────────────────────
+
+function renderOpponents(state) {
+    const { players, whose_turn, phase, turn_order } = state;
+    const area = document.getElementById("opponents-area");
+    area.innerHTML = "";
+
+    const order = (turn_order && turn_order.length) ? turn_order : Object.keys(players);
+    const others = order.filter(n => n !== MY_NAME);
+
+    if (others.length === 0) {
+        area.innerHTML = '<p class="empty-opponents">No other players yet</p>';
+        return;
+    }
+
+    others.forEach(name => {
+        const p = players[name];
+        if (!p) return;
+        const isActive = name === whose_turn;
+
+        const box = document.createElement("div");
+        box.className = "opponent-box" + (isActive ? " active" : "");
+
+        const turnTag = isActive ? ' <span class="turn-tag">playing</span>' : "";
+        let html = `<div class="opp-name">${name}${turnTag}</div>`;
+        html += `<div class="opp-chips">${p.chips.toLocaleString()} chips</div>`;
+
+        if (p.hands && p.hands.length) {
+            p.hands.forEach(h => {
+                const lbl = handStatusLabel(h.status);
+                const lblHTML = lbl ? ` <span class="status-label status-${h.status}">${lbl}</span>` : "";
+                html += `<div class="hand">
+                    <div class="hand-info">Bet: ${h.bet.toLocaleString()} &nbsp;·&nbsp; ${h.value}${lblHTML}</div>
+                    <div class="opp-cards" data-cards='${JSON.stringify(h.cards)}'></div>
+                </div>`;
+            });
+        } else if (phase === "betting") {
+            html += `<div class="waiting-bet">waiting for bet…</div>`;
+        }
+
+        box.innerHTML = html;
+        area.appendChild(box);
+
+        box.querySelectorAll(".opp-cards").forEach(el => {
+            const row = document.createElement("div");
+            row.className = "card-row";
+            el.appendChild(row);
+            renderCards(row, JSON.parse(el.dataset.cards), "sm");
+        });
+    });
+}
+
+// ── My area ───────────────────────────────────────────────────────
+
+function renderMyArea(state) {
+    const { players, whose_turn, phase } = state;
+    const me = players[MY_NAME];
+    if (!me) return;
+
+    document.getElementById("my-chips-label").textContent = me.chips.toLocaleString() + " chips";
+    document.getElementById("my-chips").textContent = me.chips.toLocaleString() + " chips";
+
+    const handsEl = document.getElementById("my-hands");
+    handsEl.innerHTML = "";
+
+    if (me.hands && me.hands.length) {
+        me.hands.forEach(h => {
+            const lbl = handStatusLabel(h.status);
+            const lblHTML = lbl ? ` <span class="status-label status-${h.status}">${lbl}</span>` : "";
+            const div = document.createElement("div");
+            div.className = "my-hand";
+            div.innerHTML = `
+                <div class="hand-info">Bet: ${h.bet.toLocaleString()} &nbsp;·&nbsp; Value: ${h.value}${lblHTML}</div>
+                <div class="my-cards" data-cards='${JSON.stringify(h.cards)}'></div>
+            `;
+            handsEl.appendChild(div);
+            const row = document.createElement("div");
+            row.className = "card-row";
+            div.querySelector(".my-cards").appendChild(row);
+            renderCards(row, JSON.parse(div.querySelector(".my-cards").dataset.cards), "lg");
+        });
+    }
+
+    const statusEl = document.getElementById("my-status");
+    if (phase === "playing" && whose_turn && whose_turn !== MY_NAME) {
+        statusEl.textContent = "Waiting for " + whose_turn + " to play…";
+        statusEl.className = "waiting-status";
+    } else if (phase === "betting" && me.hands && me.hands.length > 0) {
+        statusEl.textContent = "Bet placed — waiting for others…";
+        statusEl.className = "waiting-status";
+    } else {
+        statusEl.textContent = "";
+        statusEl.className = "";
+    }
+}
+
+// ── Controls ──────────────────────────────────────────────────────
+
 function updateControls(state) {
     const { phase, whose_turn, players } = state;
     const me = players[MY_NAME];
 
-    hide("ctrl-start");
-    hide("ctrl-bet");
-    hide("ctrl-play");
-    hide("ctrl-reload");
+    hide("ctrl-start"); hide("ctrl-bet"); hide("ctrl-play"); hide("ctrl-reload");
 
     if (phase === "waiting" || phase === "payout") {
         show("ctrl-start");
@@ -141,94 +260,34 @@ function updateControls(state) {
     if (phase === "betting" && me) {
         const hasBet = me.hands && me.hands.length > 0;
         if (!hasBet) show("ctrl-bet");
-        else {
-            const waiting = document.createElement("p");
-            waiting.textContent = "Bet placed — waiting for others…";
-        }
     }
 
     if (phase === "playing" && whose_turn === MY_NAME && me) {
         show("ctrl-play");
         const activeHand = (me.hands || []).find(h => h.status === "active");
         if (activeHand) {
-            document.getElementById("btn-hit").disabled = !activeHand.can_hit;
-            document.getElementById("btn-stand").disabled = !activeHand.can_stand;
+            document.getElementById("btn-hit").disabled    = !activeHand.can_hit;
+            document.getElementById("btn-stand").disabled  = !activeHand.can_stand;
             document.getElementById("btn-double").disabled = !activeHand.can_double;
-            document.getElementById("btn-split").disabled = !activeHand.can_split;
+            document.getElementById("btn-split").disabled  = !activeHand.can_split;
         }
     }
 }
 
-function renderDealer(state) {
-    renderCards(document.getElementById("dealer-cards"), state.dealer.cards);
-    const valEl = document.getElementById("dealer-value");
-    valEl.textContent = state.dealer.value != null ? "(" + state.dealer.value + ")" : "";
-}
-
-function handStatusLabel(status) {
-    const map = { bust: "BUST", blackjack: "BLACKJACK!", stood: "Stood", doubled: "Doubled", active: "" };
-    return map[status] || status;
-}
-
-function renderPlayers(state) {
-    const { players, whose_turn, phase, turn_order } = state;
-    const grid = document.getElementById("players-grid");
-    grid.innerHTML = "";
-
-    const order = (turn_order && turn_order.length) ? turn_order : Object.keys(players);
-
-    order.forEach(name => {
-        const p = players[name];
-        if (!p) return;
-
-        const isMe = name === MY_NAME;
-        const isActive = name === whose_turn;
-
-        const box = document.createElement("div");
-        box.className = "player-box" + (isMe ? " me" : "") + (isActive ? " active" : "");
-
-        const nameTag = isActive ? name + " ← turn" : name;
-        let html = `<div class="player-name">${nameTag}</div>`;
-        html += `<div class="player-chips">${p.chips.toLocaleString()} chips</div>`;
-
-        if (p.hands && p.hands.length) {
-            p.hands.forEach(h => {
-                const label = handStatusLabel(h.status);
-                const labelHTML = label ? ` <span class="status-label status-${h.status}">${label}</span>` : "";
-                html += `<div class="hand">
-                    <div class="hand-info">Bet: ${h.bet.toLocaleString()} &nbsp; Value: ${h.value}${labelHTML}</div>
-                    <div class="hand-cards" data-cards='${JSON.stringify(h.cards)}'></div>
-                </div>`;
-            });
-        } else if (phase === "betting") {
-            html += `<div class="waiting-bet">waiting for bet…</div>`;
-        }
-
-        box.innerHTML = html;
-        grid.appendChild(box);
-
-        box.querySelectorAll(".hand-cards").forEach(el => {
-            renderCards(el, JSON.parse(el.dataset.cards));
-        });
-    });
-
-    const me = players[MY_NAME];
-    document.getElementById("my-chips").textContent = me ? me.chips.toLocaleString() + " chips" : "";
-}
+// ── Socket ────────────────────────────────────────────────────────
 
 socket.on("game_state", state => {
     currentState = state;
     updatePhase(state.phase);
     renderDealer(state);
-    renderPlayers(state);
+    renderOpponents(state);
+    renderMyArea(state);
     updateControls(state);
 });
 
-socket.on("error", data => {
-    showMessage(data.message, "error");
-});
+socket.on("error", data => showMessage(data.message, "error"));
 
-// ── Actions ──────────────────────────────────────────────────────
+// ── Actions ───────────────────────────────────────────────────────
 
 function startRound() { socket.emit("start_round"); }
 
@@ -241,16 +300,13 @@ function clearBet() { document.getElementById("bet-amount").value = 25; }
 
 function placeBet() {
     const amount = parseInt(document.getElementById("bet-amount").value);
-    if (isNaN(amount)) return;
-    socket.emit("place_bet", { amount });
+    if (!isNaN(amount)) socket.emit("place_bet", { amount });
 }
 
 function doAction(action) { socket.emit(action); }
 
 function reloadChips() {
-    const me = currentState && currentState.players[MY_NAME];
-    const def = me ? me.chips || 2000 : 2000;
-    const str = prompt("How many chips would you like to buy?", def);
+    const str = prompt("How many chips would you like to buy?", 2000);
     if (str === null) return;
     const amount = parseInt(str);
     if (isNaN(amount) || amount < 100) { showMessage("Invalid amount.", "error"); return; }
