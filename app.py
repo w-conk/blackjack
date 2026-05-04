@@ -69,8 +69,8 @@ def emit_state():
 
 @app.route("/", methods=["GET", "POST"])
 def login():
-    if "player_name" in session:
-        return redirect(url_for("table"))
+    if request.method == "GET":
+        session.clear()
     error = None
     if request.method == "POST":
         name = request.form.get("name", "").strip()
