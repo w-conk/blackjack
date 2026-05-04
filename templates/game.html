@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blackjack</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div id="app">
+
+    <header>
+        <div class="header-left">
+            <h1>&#127137; Blackjack</h1>
+            <span id="phase-badge">Waiting</span>
+        </div>
+        <div class="header-right">
+            <span id="my-chips"></span>
+            <a href="/logout" class="btn-logout">Leave Table</a>
+        </div>
+    </header>
+
+    <div id="message-bar" class="hidden"></div>
+
+    <main>
+
+        <section id="dealer-section">
+            <h2>Dealer <span id="dealer-value"></span></h2>
+            <div id="dealer-cards" class="card-row"></div>
+        </section>
+
+        <section id="players-section">
+            <div id="players-grid"></div>
+        </section>
+
+        <section id="controls">
+
+            <div id="ctrl-start" class="control-group hidden">
+                <button id="btn-start" onclick="startRound()">Start Round</button>
+            </div>
+
+            <div id="ctrl-bet" class="control-group hidden">
+                <p>Place your bet</p>
+                <div class="chip-buttons">
+                    <button class="chip-btn" onclick="addBet(5)">+5</button>
+                    <button class="chip-btn" onclick="addBet(25)">+25</button>
+                    <button class="chip-btn" onclick="addBet(100)">+100</button>
+                    <button class="chip-btn" onclick="addBet(500)">+500</button>
+                </div>
+                <div class="bet-input-row">
+                    <input type="number" id="bet-amount" value="25" min="25" step="5">
+                    <button onclick="placeBet()">Bet</button>
+                    <button class="btn-secondary" onclick="clearBet()">Clear</button>
+                </div>
+            </div>
+
+            <div id="ctrl-play" class="control-group hidden">
+                <button id="btn-hit" onclick="doAction('hit')">Hit</button>
+                <button id="btn-stand" onclick="doAction('stand')">Stand</button>
+                <button id="btn-double" onclick="doAction('double_down')">Double</button>
+                <button id="btn-split" onclick="doAction('split')">Split</button>
+            </div>
+
+            <div id="ctrl-reload" class="control-group hidden">
+                <button class="btn-secondary" onclick="reloadChips()">Buy More Chips</button>
+            </div>
+
+        </section>
+
+    </main>
+</div>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+const MY_NAME = "{{ player_name }}";
+const socket = io();
+let currentState = null;
+
+const SUIT_SYMBOLS = { H: "♥", D: "♦", C: "♣", S: "♠" };
+const RED_SUITS = new Set(["H", "D"]);
+
+function formatCard(raw) {
+    if (raw === "??") return { display: "??", red: false, back: true };
+    const suit = raw.slice(-1);
+    const rank = raw.slice(0, -1);
+    return { display: rank + (SUIT_SYMBOLS[suit] || suit), red: RED_SUITS.has(suit), back: false };
+}
+
+function cardEl(raw) {
+    const { display, red, back } = formatCard(raw);
+    const div = document.createElement("div");
+    div.className = "card" + (back ? " card-back" : "") + (red ? " red" : "");
+    div.textContent = display;
+    return div;
+}
+
+function renderCards(container, cards) {
+    container.innerHTML = "";
+    (cards || []).forEach(c => container.appendChild(cardEl(c)));
+}
+
+function show(id) { document.getElementById(id).classList.remove("hidden"); }
+function hide(id) { document.getElementById(id).classList.add("hidden"); }
+
+function showMessage(msg, type = "info") {
+    const bar = document.getElementById("message-bar");
+    bar.textContent = msg;
+    bar.className = type;
+    clearTimeout(bar._timer);
+    bar._timer = setTimeout(() => { bar.className = "hidden"; }, 5000);
+}
+
+function updatePhase(phase) {
+    const labels = {
+        waiting: "Waiting",
+        betting: "Betting",
+        dealing: "Dealing",
+        playing: "Playing",
+        dealer: "Dealer’s Turn",
+        payout: "Round Over",
+    };
+    const badge = document.getElementById("phase-badge");
+    badge.textContent = labels[phase] || phase;
+    badge.className = "phase-" + phase;
+}
+
+function updateControls(state) {
+    const { phase, whose_turn, players } = state;
+    const me = players[MY_NAME];
+
+    hide("ctrl-start");
+    hide("ctrl-bet");
+    hide("ctrl-play");
+    hide("ctrl-reload");
+
+    if (phase === "waiting" || phase === "payout") {
+        show("ctrl-start");
+        if (me && me.chips === 0) show("ctrl-reload");
+    }
+
+    if (phase === "betting" && me) {
+        const hasBet = me.hands && me.hands.length > 0;
+        if (!hasBet) show("ctrl-bet");
+        else {
+            const waiting = document.createElement("p");
+            waiting.textContent = "Bet placed — waiting for others…";
+        }
+    }
+
+    if (phase === "playing" && whose_turn === MY_NAME && me) {
+        show("ctrl-play");
+        const activeHand = (me.hands || []).find(h => h.status === "active");
+        if (activeHand) {
+            document.getElementById("btn-hit").disabled = !activeHand.can_hit;
+            document.getElementById("btn-stand").disabled = !activeHand.can_stand;
+            document.getElementById("btn-double").disabled = !activeHand.can_double;
+            document.getElementById("btn-split").disabled = !activeHand.can_split;
+        }
+    }
+}
+
+function renderDealer(state) {
+    renderCards(document.getElementById("dealer-cards"), state.dealer.cards);
+    const valEl = document.getElementById("dealer-value");
+    valEl.textContent = state.dealer.value != null ? "(" + state.dealer.value + ")" : "";
+}
+
+function handStatusLabel(status) {
+    const map = { bust: "BUST", blackjack: "BLACKJACK!", stood: "Stood", doubled: "Doubled", active: "" };
+    return map[status] || status;
+}
+
+function renderPlayers(state) {
+    const { players, whose_turn, phase, turn_order } = state;
+    const grid = document.getElementById("players-grid");
+    grid.innerHTML = "";
+
+    const order = (turn_order && turn_order.length) ? turn_order : Object.keys(players);
+
+    order.forEach(name => {
+        const p = players[name];
+        if (!p) return;
+
+        const isMe = name === MY_NAME;
+        const isActive = name === whose_turn;
+
+        const box = document.createElement("div");
+        box.className = "player-box" + (isMe ? " me" : "") + (isActive ? " active" : "");
+
+        const nameTag = isActive ? name + " ← turn" : name;
+        let html = `<div class="player-name">${nameTag}</div>`;
+        html += `<div class="player-chips">${p.chips.toLocaleString()} chips</div>`;
+
+        if (p.hands && p.hands.length) {
+            p.hands.forEach(h => {
+                const label = handStatusLabel(h.status);
+                const labelHTML = label ? ` <span class="status-label status-${h.status}">${label}</span>` : "";
+                html += `<div class="hand">
+                    <div class="hand-info">Bet: ${h.bet.toLocaleString()} &nbsp; Value: ${h.value}${labelHTML}</div>
+                    <div class="hand-cards" data-cards='${JSON.stringify(h.cards)}'></div>
+                </div>`;
+            });
+        } else if (phase === "betting") {
+            html += `<div class="waiting-bet">waiting for bet…</div>`;
+        }
+
+        box.innerHTML = html;
+        grid.appendChild(box);
+
+        box.querySelectorAll(".hand-cards").forEach(el => {
+            renderCards(el, JSON.parse(el.dataset.cards));
+        });
+    });
+
+    const me = players[MY_NAME];
+    document.getElementById("my-chips").textContent = me ? me.chips.toLocaleString() + " chips" : "";
+}
+
+socket.on("game_state", state => {
+    currentState = state;
+    updatePhase(state.phase);
+    renderDealer(state);
+    renderPlayers(state);
+    updateControls(state);
+});
+
+socket.on("error", data => {
+    showMessage(data.message, "error");
+});
+
+// ── Actions ──────────────────────────────────────────────────────
+
+function startRound() { socket.emit("start_round"); }
+
+function addBet(amount) {
+    const input = document.getElementById("bet-amount");
+    input.value = Math.max(25, (parseInt(input.value) || 0) + amount);
+}
+
+function clearBet() { document.getElementById("bet-amount").value = 25; }
+
+function placeBet() {
+    const amount = parseInt(document.getElementById("bet-amount").value);
+    if (isNaN(amount)) return;
+    socket.emit("place_bet", { amount });
+}
+
+function doAction(action) { socket.emit(action); }
+
+function reloadChips() {
+    const me = currentState && currentState.players[MY_NAME];
+    const def = me ? me.chips || 2000 : 2000;
+    const str = prompt("How many chips would you like to buy?", def);
+    if (str === null) return;
+    const amount = parseInt(str);
+    if (isNaN(amount) || amount < 100) { showMessage("Invalid amount.", "error"); return; }
+    socket.emit("reload_chips", { amount });
+}
+</script>
+</body>
+</html>

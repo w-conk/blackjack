@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blackjack — Join Table</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="login-page">
+    <div class="login-box">
+        <h1>&#127137; Blackjack</h1>
+        {% if error %}
+        <p class="error">{{ error }}</p>
+        {% endif %}
+        <form method="post">
+            <div class="field">
+                <label for="name">Your name</label>
+                <input type="text" id="name" name="name" placeholder="e.g. Mike" maxlength="20" required autofocus>
+            </div>
+            <div class="field">
+                <label for="chips">Starting chips</label>
+                <input type="number" id="chips" name="chips" value="2000" min="100" max="100000">
+            </div>
+            <div class="field">
+                <label for="password">Table password</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            <button type="submit">Join Table</button>
+        </form>
+    </div>
+</body>
+</html>

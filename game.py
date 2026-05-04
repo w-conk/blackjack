@@ -304,7 +304,7 @@ class BlackjackGame:
         self.players[player_name].place_bet(amount)
 
     def all_bets_placed(self):
-        return all(len(p.hands) > 0 for p in self.players.values())
+        return all(len(self.players[n].hands) > 0 for n in self.turn_order)
 
     def deal_initial(self):
         if self.phase != GamePhase.BETTING:
