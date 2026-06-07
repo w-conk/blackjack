@@ -14,7 +14,7 @@ app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 
 TABLE_PASSWORD = os.environ.get("TABLE_PASSWORD", "blackjack")
 
-socketio = SocketIO(app, async_mode="eventlet")
+socketio = SocketIO(app, async_mode="eventlet", cors_allowed_origins="*")
 
 game = BlackjackGame()
 sid_to_player = {}  # sid -> player name, for disconnect handling
