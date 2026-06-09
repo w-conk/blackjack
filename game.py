@@ -319,8 +319,11 @@ class BlackjackGame:
     def deal_initial(self):
         if self.phase != GamePhase.BETTING:
             raise ValueError("Cannot deal now.")
-        if not self.all_bets_placed():
-            raise ValueError("Not all players have placed bets.")
+        # The round is whoever actually placed a bet (seat order preserved).
+        # Players who were eligible but didn't bet simply sit this hand out.
+        self.turn_order = [n for n in self.players if self.players[n].hands]
+        if not self.turn_order:
+            raise ValueError("No bets placed.")
         self.phase = GamePhase.DEALING
 
         # Two cards each, interleaved like a real deal
@@ -390,6 +393,22 @@ class BlackjackGame:
         self._assert_turn(player_name)
         player = self.players[player_name]
         player.split(self.deck)
+        self._skip_done_players()
+
+    def auto_stand_current(self):
+        """Stand the player whose turn it currently is (used when they've gone
+        AWOL mid-round) and advance the table so it doesn't stall."""
+        if self.phase != GamePhase.PLAYING:
+            return
+        player = self._current_active_player()
+        if player is None:
+            return
+        while not player.all_hands_done():
+            hand = player.current_hand
+            if hand and hand.status == HandStatus.ACTIVE:
+                hand.status = HandStatus.STOOD
+            player._advance_hand()
+        self.active_player_index += 1
         self._skip_done_players()
 
     def _assert_turn(self, player_name):

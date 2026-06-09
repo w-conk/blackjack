@@ -21,6 +21,7 @@
     </header>
 
     <div id="message-bar" class="hidden"></div>
+    <div id="round-banner" class="hidden"></div>
 
     <div id="table">
 
@@ -46,10 +47,6 @@
 
             <!-- Controls live inside my area -->
             <div id="controls">
-
-                <div id="ctrl-start" class="control-group hidden">
-                    <button id="btn-start" onclick="startRound()">Start Round</button>
-                </div>
 
                 <div id="ctrl-bet" class="control-group hidden">
                     <div class="chip-buttons">
@@ -155,26 +152,30 @@ function renderOpponents(state) {
     const area = document.getElementById("opponents-area");
     area.innerHTML = "";
 
-    const allNames = Object.keys(players);
-    const others = allNames.filter(n => n !== MY_NAME);
+    const others = Object.keys(players).filter(n => n !== MY_NAME);
 
     if (others.length === 0) {
         area.innerHTML = '<p class="empty-opponents">No other players yet</p>';
         return;
     }
 
+    const boxes = [];
     others.forEach(name => {
         const p = players[name];
         if (!p) return;
         const isActive = name === whose_turn;
-
         const sittingOut = turn_order && turn_order.length && !turn_order.includes(name);
+
         const box = document.createElement("div");
-        box.className = "opponent-box" + (isActive ? " active" : "") + (sittingOut ? " sitting-out" : "");
+        box.className = "opponent-box"
+            + (isActive ? " active" : "")
+            + (sittingOut ? " sitting-out" : "")
+            + (p.connected ? "" : " disconnected");
 
         const turnTag = isActive ? ' <span class="turn-tag">playing</span>' : "";
         const outTag  = sittingOut ? ' <span class="out-tag">sitting out</span>' : "";
-        let html = `<div class="opp-name">${name}${turnTag}${outTag}</div>`;
+        const dcTag   = p.connected ? "" : ' <span class="dc-tag">away</span>';
+        let html = `<div class="opp-name">${name}${turnTag}${outTag}${dcTag}</div>`;
         html += `<div class="opp-chips">${p.chips.toLocaleString()} chips</div>`;
 
         if (p.hands && p.hands.length) {
@@ -192,6 +193,7 @@ function renderOpponents(state) {
 
         box.innerHTML = html;
         area.appendChild(box);
+        boxes.push(box);
 
         box.querySelectorAll(".opp-cards").forEach(el => {
             const row = document.createElement("div");
@@ -199,6 +201,24 @@ function renderOpponents(state) {
             el.appendChild(row);
             renderCards(row, JSON.parse(el.dataset.cards), "sm");
         });
+    });
+
+    layoutSeats(area, boxes);
+}
+
+// Arrange opponent seats along the top arc of an oval, around the dealer.
+function layoutSeats(area, boxes) {
+    const n = boxes.length;
+    const w = area.clientWidth, h = area.clientHeight;
+    const cx = w / 2, cy = h * 0.58;
+    const rx = w * 0.38, ry = h * 0.42;
+    boxes.forEach((box, i) => {
+        // Spread from left (180°) through top (270°) to right (360°).
+        const angle = (180 + (i + 1) * (180 / (n + 1))) * Math.PI / 180;
+        const x = cx + rx * Math.cos(angle);
+        const y = cy + ry * Math.sin(angle);
+        box.style.left = x + "px";
+        box.style.top = y + "px";
     });
 }
 
@@ -253,25 +273,23 @@ function renderMyArea(state) {
 // ── Controls ──────────────────────────────────────────────────────
 
 function updateControls(state) {
-    const { phase, whose_turn, players } = state;
+    const { phase, whose_turn, players, min_bet } = state;
     const me = players[MY_NAME];
 
-    hide("ctrl-start"); hide("ctrl-bet"); hide("ctrl-play"); hide("ctrl-reload");
+    hide("ctrl-bet"); hide("ctrl-play"); hide("ctrl-reload");
+    if (!me) return;
 
-    const inRound = state.turn_order && state.turn_order.includes(MY_NAME);
+    const minBet = min_bet || 25;
+    const broke = me.chips < minBet;
 
-    if (phase === "waiting" || phase === "payout") {
-        show("ctrl-start");
-        if (me && me.chips === 0) show("ctrl-reload");
+    // You can top up whenever you're not mid-hand.
+    if ((phase === "waiting" || phase === "payout" || phase === "betting") && broke) {
+        show("ctrl-reload");
     }
 
-    if (phase === "betting" && me) {
-        if (!inRound) {
-            if (me.chips === 0) show("ctrl-reload");
-        } else {
-            const hasBet = me.hands && me.hands.length > 0;
-            if (!hasBet) show("ctrl-bet");
-        }
+    if (phase === "betting") {
+        const hasBet = me.hands && me.hands.length > 0;
+        if (!hasBet && !broke) show("ctrl-bet");
     }
 
     if (phase === "playing" && whose_turn === MY_NAME && me) {
@@ -288,20 +306,99 @@ function updateControls(state) {
 
 // ── Socket ────────────────────────────────────────────────────────
 
+let serverOffset = 0;     // serverClock - localClock, in ms
+let betDeadline = null;   // epoch seconds the betting window closes
+let wasMyTurn = false;
+
 socket.on("game_state", state => {
     currentState = state;
+
+    // Sync to the server clock so the countdown is accurate across machines.
+    if (typeof state.server_now === "number") {
+        serverOffset = state.server_now * 1000 - Date.now();
+    }
+    betDeadline = state.bet_deadline;
+
+    // Ding when it becomes my turn.
+    const myTurn = state.phase === "playing" && state.whose_turn === MY_NAME;
+    if (myTurn && !wasMyTurn) playDing();
+    wasMyTurn = myTurn;
+
     updatePhase(state.phase);
     renderDealer(state);
     renderOpponents(state);
     renderMyArea(state);
     updateControls(state);
+    updateBanner();
 });
 
 socket.on("error", data => showMessage(data.message, "error"));
 
-// ── Actions ───────────────────────────────────────────────────────
+// ── Countdown banner ──────────────────────────────────────────────
 
-function startRound() { socket.emit("start_round"); }
+function serverNow() { return (Date.now() + serverOffset) / 1000; }
+
+function updateBanner() {
+    const banner = document.getElementById("round-banner");
+    const state = currentState;
+    if (!state) { banner.className = "hidden"; return; }
+
+    if (state.phase === "betting" && betDeadline) {
+        const left = Math.max(0, Math.ceil(betDeadline - serverNow()));
+        const inRound = state.turn_order && state.turn_order.includes(MY_NAME);
+        const me = state.players[MY_NAME];
+        const hasBet = me && me.hands && me.hands.length > 0;
+        const verb = hasBet ? "Bet in" : (inRound ? "Place your bet —" : "Next round in");
+        banner.textContent = `${verb} ${left}s`;
+        banner.className = "betting";
+    } else if (state.phase === "playing" && state.whose_turn) {
+        banner.textContent = state.whose_turn === MY_NAME
+            ? "Your turn!"
+            : `${state.whose_turn} is playing…`;
+        banner.className = state.whose_turn === MY_NAME ? "your-turn" : "info";
+    } else if (state.phase === "payout") {
+        banner.textContent = "Round over — next hand shortly";
+        banner.className = "info";
+    } else if (state.phase === "waiting") {
+        banner.textContent = "Waiting for players to bet…";
+        banner.className = "info";
+    } else {
+        banner.className = "hidden";
+    }
+}
+
+setInterval(updateBanner, 250);   // keep the countdown ticking between states
+window.addEventListener("resize", () => { if (currentState) renderOpponents(currentState); });
+
+// ── Turn ding (Web Audio, unlocked on first interaction) ──────────
+
+let audioCtx = null;
+function unlockAudio() {
+    if (!audioCtx) {
+        try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+        catch (e) { return; }
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume();
+}
+document.addEventListener("click", unlockAudio);
+document.addEventListener("keydown", unlockAudio);
+
+function playDing() {
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, t);
+    osc.frequency.setValueAtTime(1175, t + 0.12);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(t); osc.stop(t + 0.45);
+}
+
+// ── Actions ───────────────────────────────────────────────────────
 
 function addBet(amount) {
     const input = document.getElementById("bet-amount");
